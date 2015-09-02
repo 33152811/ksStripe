@@ -1,3 +1,27 @@
+{ *******************************************************************************
+*                                                                              *
+*  ksStripe - Stripe Interface for Delphi                                      *
+*                                                                              *
+*  https://github.com/gmurt/ksStripe                                           *
+*                                                                              *
+*  Copyright 2015 Graham Murt                                                  *
+*                                                                              *
+*  email: graham@kernow-software.co.uk                                         *
+*                                                                              *
+*  Licensed under the Apache License, Version 2.0 (the "License");             *
+*  you may not use this file except in compliance with the License.            *
+*  You may obtain a copy of the License at                                     *
+*                                                                              *
+*    http://www.apache.org/licenses/LICENSE-2.0                                *
+*                                                                              *
+*  Unless required by applicable law or agreed to in writing, software         *
+*  distributed under the License is distributed on an "AS IS" BASIS,           *
+*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.    *
+*  See the License for the specific language governing permissions and         *
+*  limitations under the License.                                              *
+*                                                                              *
+*******************************************************************************}
+
 unit ksStripe;
 
 interface
@@ -5,7 +29,9 @@ interface
 uses Classes, Json, Generics.Collections;
 
 type
-  TStripeCurrency = (scGbp, scUsd);
+  TStripeCurrency = (scUnknown, scGbp, scUsd);
+
+//------------------------------------------------------------------------------
 
   IStripeBaseObject = interface
   ['{AC396FFE-A89C-4811-8DDD-5A3A69546155}']
@@ -16,6 +42,8 @@ type
     property Obj: string read GetObject;
   end;
 
+//------------------------------------------------------------------------------
+
   IStripeBaseObjectList = interface
   ['{3FD36F72-3FF3-4377-AE0E-120A19C63354}']
     function GetItem(index: integer): IStripeBaseObject;
@@ -25,11 +53,33 @@ type
     property Item[index: integer]: IStripeBaseObject read GetItem;
   end;
 
+//------------------------------------------------------------------------------
+
+  IStripeCharge = interface(IStripeBaseObject)
+  ['{197B9D1A-B4F1-4220-AFDC-22DE5031F1B4}']
+    function GetCreated: TDatetime;
+    function GetLiveMode: Boolean;
+    function GetPaid: Boolean;
+    function GetStatus: string;
+    function GetAmountPence: integer;
+    function GetCurrency: TStripeCurrency;
+    function GetRefunded: Boolean;
+    property Created: TDateTime read GetCreated;
+    property LiveMode: Boolean read GetLiveMode;
+    property Paid: Boolean read GetPaid;
+    property Status: string read GetStatus;
+    property AmountPence: integer read GetAmountPence;
+    property Currency: TStripeCurrency read GetCurrency;
+    property Refunded: Boolean read GetRefunded;
+  end;
+
+//------------------------------------------------------------------------------
+
   IStripePlan = interface(IStripeBaseObject)
   ['{E37D8D42-0FDE-4108-BD58-56603955FDCC}']
     function GetAmountPence: integer;
     function GetCreated: TDateTime;
-    function GetCurrency: string;
+    function GetCurrency: TStripeCurrency;
     function GetInterval: string;
     function GetIntervalCount: integer;
     function GetName: string;
@@ -39,11 +89,13 @@ type
     property Name: string read GetName;
     property Created: TDateTime read GetCreated;
     property AmountPence: integer read GetAmountPence;
-    property Currency: string read GetCurrency;
+    property Currency: TStripeCurrency read GetCurrency;
     property IntervalCount: integer read GetIntervalCount;
     property TrialPeriodDays: integer read GetTrialPeriodDays;
     property StatementDescriptor: string read GetStatementDescriptor;
   end;
+
+//------------------------------------------------------------------------------
 
   IStripeSubscription = interface(IStripeBaseObject)
   ['{3F2BE016-7483-4020-BEB6-F0A3B55E9753}']
@@ -73,10 +125,13 @@ type
     property TaxPercent: single read GetTaxPercent;
   end;
 
+//------------------------------------------------------------------------------
+
   IStripeSubscriptionList = interface(IStripeBaseObjectList)
   ['{27861C97-3F5F-4546-9CAE-1248040E5159}']
   end;
 
+//------------------------------------------------------------------------------
 
   IStripeCustomer = interface(IStripeBaseObject)
   ['{CFA07B51-F63C-4972-ACAB-FA51D6DF5779}']
@@ -88,9 +143,13 @@ type
     property AccountBalance: integer read GetAccountBalance;
   end;
 
+//------------------------------------------------------------------------------
+
   IStripeCusotomerList = interface(IStripeBaseObjectList)
   ['{A84D8E11-C142-4E4C-9698-A6DFBCE14742}']
   end;
+
+//------------------------------------------------------------------------------
 
   IStripeCard = interface(IStripeBaseObject)
   ['{76652D56-42CE-4C2F-B0B2-1E6485D501AD}']
@@ -124,12 +183,20 @@ type
     property CvcCheck: string read GetCvcCheck;
   end;
 
+//------------------------------------------------------------------------------
+
   IStripe = interface
   ['{A00E2188-0DDB-469F-9C4A-0900DEEFD27B}']
+    function GetLastError: string;
     function GetCustomer(ACustID: string): IStripeCustomer;
     function CreateToken(ACardNum: string; AExpMonth, AExpYear: integer; ACvc: string): string;
-    procedure CreateCharge(AToken, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp);
+    function CreateCharge(AToken, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp): IStripeCharge;
+    property LastError: string read GetLastError;
   end;
+
+//------------------------------------------------------------------------------
+
+
 
   function  CreateStripe(ASecretKey: string): IStripe;
 
@@ -153,12 +220,18 @@ const
   C_SUBSCRIPTIONS = 'subscriptions';
 
 type
+//------------------------------------------------------------------------------
+
   TStripeBaseObject = class(TInterfacedObject, IStripeBaseObject)
   strict private
+    FJson: TJSONObject;
     FId: string;
     FObj: string;
   protected
-    function DateFromTimeStamp(AJson: TJSONObject; AName: string): TDateTime;
+    function StrFromJson(AName: string): string;
+    function DateFromJson(AName: string): TDateTime;
+    function BoolFromJson(AName: string): Boolean;
+    function IntFromJson(AName: string): integer;
     function GetID: string;
     function GetObj: string;
     function GetObject: string; virtual; abstract;
@@ -169,8 +242,10 @@ type
     constructor Create; virtual;
   end;
 
+//------------------------------------------------------------------------------
+
   TStripeBaseObjectList = class(TInterfacedObject, IStripeBaseObjectList)
-  private
+  strict private
     FItems: TList<TStripeBaseObject>;
   protected
     constructor Create; virtual;
@@ -183,117 +258,38 @@ type
     property Item[index: integer]: IStripeBaseObject read GetItem;
   end;
 
+//------------------------------------------------------------------------------
 
-  TStripePlan = class(TStripeBaseObject, IStripePlan)
+  TStripeCharge = class(TStripeBaseObject, IStripeCharge)
   strict private
-    FInterval: string;
-    FName: string;
     FCreated: TDateTime;
-    FAmountPence: integer;
-    FCurrency: string;
-    FIntervalCount: integer;
-    FTrialPeriodDays: integer;
-    FStatementDescriptor: string;
-  private
-    function GetAmountPence: integer;
-    function GetCreated: TDateTime;
-    function GetCurrency: string;
-    function GetInterval: string;
-    function GetIntervalCount: integer;
-    function GetName: string;
-    function GetStatementDescriptor: string;
-    function GetTrialPeriodDays: integer;
-  protected
-    function GetObject: string; override;
-    procedure LoadFromJson(AJson: TJsonObject); override;
-    property Interval: string read GetInterval;
-    property Name: string read GetName;
-    property Created: TDateTime read GetCreated;
-    property AmountPence: integer read GetAmountPence;
-    property Currency: string read GetCurrency;
-    property IntervalCount: integer read GetIntervalCount;
-    property TrialPeriodDays: integer read GetTrialPeriodDays;
-    property StatementDescriptor: string read GetStatementDescriptor;
-  end;
-
-  TStripeSubscription = class(TStripeBaseObject, IStripeSubscription)
-  strict private
-    FPlan: IStripePlan;
-    FStart: TDateTime;
+    FLiveMode: Boolean;
+    FPaid: Boolean;
     FStatus: string;
-    FCustomer: string;
-    FCurrentPeriodStart: TDateTime;
-    FCurrentPeriodEnd: TDateTime;
-    FEndedAt: TDateTime;
-    FTrialStart: TDateTime;
-    FTrialEnd: TDateTime;
-    FCancelledAt: TDateTime;
-    FQuantity: integer;
-    FTaxPercent: Single;
+    FAmountPence: integer;
+    FCurrency: TStripeCurrency;
+    FRefunded: Boolean;
   private
-    function GetCancelledAt: TDateTime;
-    function GetCurrentPeriodEnd: TDateTime;
-    function GetCurrentPeriodStart: TDateTime;
-    function GetCustomer: string;
-    function GetEndedAt: TDateTime;
-    function GetPlan: IStripePlan;
-    function GetQuantity: integer;
-    function GetStart: TDateTime;
+    function GetCreated: TDatetime;
+    function GetLiveMode: Boolean;
+    function GetPaid: Boolean;
     function GetStatus: string;
-    function GetTaxPercent: single;
-    function GetTrialEnd: TDateTime;
-    function GetTrialStart: TDateTime;
+    function GetAmountPence: integer;
+    function GetCurrency: TStripeCurrency;
+    function GetRefunded: Boolean;
   protected
     function GetObject: string; override;
     procedure LoadFromJson(AJson: TJsonObject); override;
-  public
-    constructor Create; override;
-    property Plan: IStripePlan read GetPlan;
-    property Start: TDateTime read GetStart;
+    property Created: TDateTime read GetCreated;
+    property LiveMode: Boolean read GetLiveMode;
+    property Paid: Boolean read GetPaid;
     property Status: string read GetStatus;
-    property Customer: string read GetCustomer;
-    property CurrentPeriodStart: TDateTime read GetCurrentPeriodStart;
-    property CurrentPeriodEnd: TDateTime read GetCurrentPeriodEnd;
-    property EndedAt: TDateTime read GetEndedAt;
-    property TrialStart: TDateTime read GetTrialStart;
-    property TrialEnd: TDateTime read GetTrialEnd;
-    property CancelledAt: TDateTime read GetCancelledAt;
-    property Quantity: integer read GetQuantity;
-    property TaxPercent: single read GetTaxPercent;
+    property AmountPence: integer read GetAmountPence;
+    property Currency: TStripeCurrency read GetCurrency;
+    property Refunded: Boolean read GetRefunded;
   end;
 
-  TStripeSubscriptionList = class(TStripeBaseObjectList, IStripeSubscriptionList)
-  protected
-    function CreateObject: IStripeBaseObject; override;
-    function GetListID: string; override;
-  end;
-
-  TStripeCustomer = class(TStripeBaseObject, IStripeCustomer)
-  strict private
-    FEmail: string;
-    FCurrency: string;
-    FAccountBalance: integer;
-    FSubscriptions: IStripeSubscriptionList;
-  private
-    function GetAccountBalance: integer;
-    function GetCurrency: string;
-    function GetEmail: string;
-  protected
-    function GetObject: string; override;
-    procedure LoadFromJson(AJson: TJsonObject); override;
-    property Email: string read GetEmail;
-    property Currency: string read GetCurrency;
-    property AccountBalance: integer read GetAccountBalance;
-  public
-    constructor Create; virtual;
-  end;
-
-  TStripeCustomerList = class(TStripeBaseObjectList, IStripeCusotomerList)
-  protected
-    function CreateObject: IStripeBaseObject; override;
-    function GetListID: string; override;
-  end;
-
+//------------------------------------------------------------------------------
 
   TStripeCard = class(TStripeBaseObject, IStripeCard)
   strict private
@@ -345,9 +341,133 @@ type
     property CvcCheck: string read GetCvcCheck;
   end;
 
+//------------------------------------------------------------------------------
+
+  TStripePlan = class(TStripeBaseObject, IStripePlan)
+  strict private
+    FInterval: string;
+    FName: string;
+    FCreated: TDateTime;
+    FAmountPence: integer;
+    FCurrency: TStripeCurrency;
+    FIntervalCount: integer;
+    FTrialPeriodDays: integer;
+    FStatementDescriptor: string;
+  private
+    function GetAmountPence: integer;
+    function GetCreated: TDateTime;
+    function GetCurrency: TStripeCurrency;
+    function GetInterval: string;
+    function GetIntervalCount: integer;
+    function GetName: string;
+    function GetStatementDescriptor: string;
+    function GetTrialPeriodDays: integer;
+  protected
+    function GetObject: string; override;
+    procedure LoadFromJson(AJson: TJsonObject); override;
+    property Interval: string read GetInterval;
+    property Name: string read GetName;
+    property Created: TDateTime read GetCreated;
+    property AmountPence: integer read GetAmountPence;
+    property Currency: TStripeCurrency read GetCurrency;
+    property IntervalCount: integer read GetIntervalCount;
+    property TrialPeriodDays: integer read GetTrialPeriodDays;
+    property StatementDescriptor: string read GetStatementDescriptor;
+  end;
+
+//------------------------------------------------------------------------------
+
+  TStripeSubscription = class(TStripeBaseObject, IStripeSubscription)
+  strict private
+    FPlan: IStripePlan;
+    FStart: TDateTime;
+    FStatus: string;
+    FCustomer: string;
+    FCurrentPeriodStart: TDateTime;
+    FCurrentPeriodEnd: TDateTime;
+    FEndedAt: TDateTime;
+    FTrialStart: TDateTime;
+    FTrialEnd: TDateTime;
+    FCancelledAt: TDateTime;
+    FQuantity: integer;
+    FTaxPercent: Single;
+  private
+    function GetCancelledAt: TDateTime;
+    function GetCurrentPeriodEnd: TDateTime;
+    function GetCurrentPeriodStart: TDateTime;
+    function GetCustomer: string;
+    function GetEndedAt: TDateTime;
+    function GetPlan: IStripePlan;
+    function GetQuantity: integer;
+    function GetStart: TDateTime;
+    function GetStatus: string;
+    function GetTaxPercent: single;
+    function GetTrialEnd: TDateTime;
+    function GetTrialStart: TDateTime;
+  protected
+    function GetObject: string; override;
+    procedure LoadFromJson(AJson: TJsonObject); override;
+  public
+    constructor Create; override;
+    property Plan: IStripePlan read GetPlan;
+    property Start: TDateTime read GetStart;
+    property Status: string read GetStatus;
+    property Customer: string read GetCustomer;
+    property CurrentPeriodStart: TDateTime read GetCurrentPeriodStart;
+    property CurrentPeriodEnd: TDateTime read GetCurrentPeriodEnd;
+    property EndedAt: TDateTime read GetEndedAt;
+    property TrialStart: TDateTime read GetTrialStart;
+    property TrialEnd: TDateTime read GetTrialEnd;
+    property CancelledAt: TDateTime read GetCancelledAt;
+    property Quantity: integer read GetQuantity;
+    property TaxPercent: single read GetTaxPercent;
+  end;
+
+//------------------------------------------------------------------------------
+
+  TStripeSubscriptionList = class(TStripeBaseObjectList, IStripeSubscriptionList)
+  protected
+    function CreateObject: IStripeBaseObject; override;
+    function GetListID: string; override;
+  end;
+
+//------------------------------------------------------------------------------
+
+  TStripeCustomer = class(TStripeBaseObject, IStripeCustomer)
+  strict private
+    FEmail: string;
+    FCurrency: string;
+    FAccountBalance: integer;
+    FSubscriptions: IStripeSubscriptionList;
+  private
+    function GetAccountBalance: integer;
+    function GetCurrency: string;
+    function GetEmail: string;
+  protected
+    function GetObject: string; override;
+    procedure LoadFromJson(AJson: TJsonObject); override;
+    property Email: string read GetEmail;
+    property Currency: string read GetCurrency;
+    property AccountBalance: integer read GetAccountBalance;
+  public
+    constructor Create; override;
+  end;
+
+//------------------------------------------------------------------------------
+
+  TStripeCustomerList = class(TStripeBaseObjectList, IStripeCusotomerList)
+  protected
+    function CreateObject: IStripeBaseObject; override;
+    function GetListID: string; override;
+  end;
+
+
+//------------------------------------------------------------------------------
+
   TStripe = class(TInterfacedObject, IStripe)
   strict private
     FSecretKey: string;
+    FLastError: string;
   private
     procedure CheckForError(AJson: TJsonObject);
     procedure NetHTTPClient1AuthEvent(const Sender: TObject;
@@ -358,13 +478,17 @@ type
     function CreateHttp: TNetHTTPClient;
     function GetHttp(AMethod: string): string;
     function PostHttp(AToken, AMethod: string; AParams: TStrings): string;
+    function GetLastError: string;
   protected
     function GetCustomer(ACustID: string): IStripeCustomer;
     function CreateToken(ACardNum: string; AExpMonth, AExpYear: integer; ACvc: string): string;
-    procedure CreateCharge(AToken, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp);
+    function CreateCharge(AToken, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp): IStripeCharge;
+    property LastError: string read GetLastError;
   public
     constructor Create(ASecretKey: string);
   end;
+
+//------------------------------------------------------------------------------
 
 
 function  CreateStripe(ASecretKey: string): IStripe;
@@ -374,13 +498,30 @@ end;
 
 function CurrencyToString(ACurrency: TStripeCurrency): string;
 begin
+  Result := '';
   case ACurrency of
     scGbp: Result := 'gbp';
     scUsd: Result := 'usd';
   end;
 end;
 
+function StringToCurrency(AValue: string): TStripeCurrency;
+begin
+  AValue := LowerCase(AValue);
+  Result := scUnknown;
+  if AValue = 'gbp' then Result := scGbp;
+  if AValue = 'usd' then Result := scUsd;
+end;
+
+//------------------------------------------------------------------------------
+
 { TStripe }
+
+constructor TStripe.Create(ASecretKey: string);
+begin
+  inherited Create;
+  FSecretKey := ASecretKey;
+end;
 
 procedure TStripe.CheckForError(AJson: TJsonObject);
 var
@@ -389,38 +530,26 @@ begin
   if AJson.Values['error'] <> nil then
   begin
     AError := AJson.Values['error'] as TJSONObject;
-    raise Exception.Create(AError.Values['message'].Value);
+    FLastError := AError.Values['message'].Value;
+    raise Exception.Create(FLastError);
   end;
 end;
 
-constructor TStripe.Create(ASecretKey: string);
-begin
-  inherited Create;
-  FSecretKey := ASecretKey;
-end;
-
-procedure TStripe.CreateCharge(AToken, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp);
+function TStripe.CreateCharge(AToken, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp): IStripeCharge;
 var
   AParams: TStrings;
   AResult: string;
   AJson: TJSONObject;
-  AError: TJsonObject;
 begin
+  Result := TStripeCharge.Create;
   AParams := TStringList.Create;
   try
     AParams.Values['amount'] := IntToStr(AAmountPence);
     AParams.Values['currency'] := CurrencyToString(ACurrency);
     AResult := PostHttp(AToken, C_CHARGES, AParams);
     AJson := TJSONObject.ParseJSONValue(AResult) as TJSONObject;
-    try
-      if AJson.Values['error'] <> nil then
-      begin
-        AError := AJson.Values['error'] as TJsonObject;
-        raise Exception.Create(AError.Values['message'].Value);
-      end;
-    finally
-      AJson.Free;
-    end;
+    CheckForError(AJson);
+    Result.LoadFromJson(AJson);
   finally
     AParams.Free;
   end;
@@ -488,6 +617,11 @@ begin
   end;
 end;
 
+function TStripe.GetLastError: string;
+begin
+  Result := FLastError;
+end;
+
 function TStripe.PostHttp(AToken, AMethod: string; AParams: TStrings): string;
 var
   AHttp: TNetHTTPClient;
@@ -516,6 +650,8 @@ begin
     APassword := '';
   end;
 end;
+
+//------------------------------------------------------------------------------
 
 { TStripeCard }
 
@@ -574,7 +710,6 @@ begin
   Result := FLast4;
 end;
 
-
 function TStripeCard.GetName: string;
 begin
   Result := FName;
@@ -596,6 +731,8 @@ begin
   Result := FZip;
 end;
 
+//------------------------------------------------------------------------------
+
 { TStripeBaseObject }
 
 constructor TStripeBaseObject.Create;
@@ -604,13 +741,26 @@ begin
   FObj := GetObject;
 end;
 
-function TStripeBaseObject.DateFromTimeStamp(AJson: TJSONObject;
-  AName: string): TDateTime;
+function TStripeBaseObject.DateFromJson(AName: string): TDateTime;
 var
   ATimestamp: integer;
 begin
-  ATimestamp := StrToIntDef(AJson.Values[AName].Value, 0);
+  ATimestamp := IntFromJson(AName);
   Result := UnixToDateTime(ATimestamp);
+end;
+
+function TStripeBaseObject.BoolFromJson(AName: string): Boolean;
+begin
+  Result := False;
+  if FJson.Values[AName] <> nil then
+    Result := LowerCase(FJson.Values[AName].Value) = 'true';
+end;
+
+function TStripeBaseObject.IntFromJson(AName: string): integer;
+begin
+  Result := 0;
+  if StrFromJson(AName) <> '' then
+  Result := StrToIntDef(StrFromJson(AName), 0);
 end;
 
 function TStripeBaseObject.GetID: string;
@@ -625,9 +775,19 @@ end;
 
 procedure TStripeBaseObject.LoadFromJson(AJson: TJsonObject);
 begin
-  FId := AJson.Values['id'].Value;
-  FObj := AJson.Values['object'].Value;
+  FJson := AJson;
+  FId := StrFromJson('id');
+  FObj := StrFromJson('object');
 end;
+
+function TStripeBaseObject.StrFromJson(AName: string): string;
+begin
+  Result := '';
+  if FJson.Values[AName] <> nil then
+    Result := FJson.Values[AName].Value;
+end;
+
+//------------------------------------------------------------------------------
 
 { TStripeCustomer }
 
@@ -659,11 +819,13 @@ end;
 procedure TStripeCustomer.LoadFromJson(AJson: TJsonObject);
 begin
   inherited;
-  FEmail := AJson.Values['email'].Value;
-  FCurrency := AJson.Values['currency'].Value;
-  FAccountBalance := StrToIntDef(AJson.Values['account_balance'].Value, 0);
+  FEmail := StrFromJson('email');
+  FCurrency := StrFromJson('currency');
+  FAccountBalance := IntFromJson('account_balance');
   FSubscriptions.LoadFromJson(AJson);
 end;
+
+//------------------------------------------------------------------------------
 
 { TStripePlan }
 
@@ -677,7 +839,7 @@ begin
   Result := FCreated;
 end;
 
-function TStripePlan.GetCurrency: string;
+function TStripePlan.GetCurrency: TStripeCurrency;
 begin
   Result := FCurrency;
 end;
@@ -715,15 +877,17 @@ end;
 procedure TStripePlan.LoadFromJson(AJson: TJsonObject);
 begin
   inherited;
-  FInterval := AJson.Values['interval'].Value;
-  FName := AJson.Values['name'].Value;
-  FCreated := DateFromTimeStamp(AJson, 'created');
-  FAmountPence := StrToIntDef(AJson.Values['amount'].Value, 0);
-  FCurrency := AJson.Values['currency'].Value;
-  FIntervalCount := StrToIntDef(AJson.Values['interval_count'].Value, 0);
-  FTrialPeriodDays := StrToIntDef(AJson.Values['trial_period_days'].Value, 0);
-  FStatementDescriptor := AJson.Values['statement_descriptor'].Value;
+  FInterval := StrFromJson('interval');
+  FName := StrFromJson('name');
+  FCreated := DateFromJson('created');
+  FAmountPence := IntFromJson('amount');
+  FCurrency :=  StringToCurrency(StrFromJson('currency'));
+  FIntervalCount := IntFromJson('interval_count');
+  FTrialPeriodDays := IntFromJson('trial_period_days');
+  FStatementDescriptor := StrFromJson('statement_descriptor');
 end;
+
+//------------------------------------------------------------------------------
 
 { TStripeSubscription }
 
@@ -802,8 +966,10 @@ procedure TStripeSubscription.LoadFromJson(AJson: TJsonObject);
 begin
   inherited;
   FPlan.LoadFromJson(AJson.Values['plan'] as TJSONObject);
-  FStatus := AJson.Values['status'].Value;
+  FStatus := StrFromJson('status');
 end;
+
+//------------------------------------------------------------------------------
 
 { TStripeBaseObjectList<T> }
 
@@ -844,6 +1010,8 @@ begin
 end;
 
 
+//------------------------------------------------------------------------------
+
 { TStripeCustomerList }
 
 function TStripeCustomerList.CreateObject: IStripeBaseObject;
@@ -856,6 +1024,8 @@ begin
   Result := C_CUSTOMERS;
 end;
 
+//------------------------------------------------------------------------------
+
 { TStripeSubscriptionList }
 
 function TStripeSubscriptionList.CreateObject: IStripeBaseObject;
@@ -866,6 +1036,62 @@ end;
 function TStripeSubscriptionList.GetListID: string;
 begin
   Result := C_SUBSCRIPTIONS;
+end;
+
+//------------------------------------------------------------------------------
+
+{ TStripeCharge }
+
+function TStripeCharge.GetAmountPence: integer;
+begin
+  Result := FAmountPence;
+end;
+
+function TStripeCharge.GetCurrency: TStripeCurrency;
+begin
+  Result := FCurrency;
+end;
+
+function TStripeCharge.GetCreated: TDatetime;
+begin
+  Result := FCreated;
+end;
+
+function TStripeCharge.GetLiveMode: Boolean;
+begin
+  Result := FLiveMode;
+end;
+
+function TStripeCharge.GetObject: string;
+begin
+  Result := C_CHARGE;
+end;
+
+function TStripeCharge.GetPaid: Boolean;
+begin
+  Result := FPaid;
+end;
+
+function TStripeCharge.GetRefunded: Boolean;
+begin
+  Result := FRefunded;
+end;
+
+function TStripeCharge.GetStatus: string;
+begin
+  Result := FStatus;
+end;
+
+procedure TStripeCharge.LoadFromJson(AJson: TJsonObject);
+begin
+  inherited;
+  FCreated := DateFromJson('created');
+  FLiveMode := BoolFromJson('livemode');
+  FPaid := BoolFromJson('livemode');
+  FStatus := StrFromJson('status');
+  FAmountPence := IntFromJson('amount');
+  FCurrency := StringToCurrency(StrFromJson('currency'));
+  FRefunded := BoolFromJson('refunded');
 end;
 
 end.
