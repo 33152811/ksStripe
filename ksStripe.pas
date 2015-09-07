@@ -46,10 +46,12 @@ type
 
   IStripeBaseObjectList = interface
   ['{3FD36F72-3FF3-4377-AE0E-120A19C63354}']
+    function GetCount: integer;
     function GetItem(index: integer): IStripeBaseObject;
     function GetListID: string;
     procedure Clear;
     procedure LoadFromJson(AJson: TJSONObject);
+    property Count: integer read GetCount;
     property Item[index: integer]: IStripeBaseObject read GetItem;
   end;
 
@@ -136,11 +138,17 @@ type
   IStripeCustomer = interface(IStripeBaseObject)
   ['{CFA07B51-F63C-4972-ACAB-FA51D6DF5779}']
     function GetAccountBalance: integer;
-    function GetCurrency: string;
+    function GetCurrency: TStripeCurrency;
     function GetEmail: string;
-    property Email: string read GetEmail;
-    property Currency: string read GetCurrency;
-    property AccountBalance: integer read GetAccountBalance;
+    function GetDescription: string;
+    procedure SetEmail(const Value: string);
+    procedure SetCurrency(const Value: TStripeCurrency);
+    procedure SetAccountBalance(const Value: integer);
+    procedure SetDescription(const Value: string);
+    property Email: string read GetEmail write SetEmail;
+    property Description: string read GetDescription write SetDescription;
+    property Currency: TStripeCurrency read GetCurrency write SetCurrency;
+    property AccountBalance: integer read GetAccountBalance write SetAccountBalance;
   end;
 
 //------------------------------------------------------------------------------
@@ -188,9 +196,12 @@ type
   IStripe = interface
   ['{A00E2188-0DDB-469F-9C4A-0900DEEFD27B}']
     function GetLastError: string;
-    function GetCustomer(ACustID: string): IStripeCustomer;
     function CreateToken(ACardNum: string; AExpMonth, AExpYear: integer; ACvc: string): string;
     function CreateCharge(AToken, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp): IStripeCharge;
+    function CreateChargeForCustomer(ACustID, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp): IStripeCharge;
+    function GetCustomer(ACustID: string): IStripeCustomer;
+    function GetCustomers: IStripeCusotomerList;
+    function CreateCustomer(AEmail, ADescription: string; ABalancePence: integer): IStripeCustomer;
     property LastError: string read GetLastError;
   end;
 
@@ -198,7 +209,8 @@ type
 
 
 
-  function  CreateStripe(ASecretKey: string): IStripe;
+  function CreateStripe(ASecretKey: string): IStripe;
+  function CreateStripeCustomer: IStripeCustomer;
 
 implementation
 
@@ -247,6 +259,8 @@ type
   TStripeBaseObjectList = class(TInterfacedObject, IStripeBaseObjectList)
   strict private
     FItems: TList<TStripeBaseObject>;
+  private
+    function GetCount: integer;
   protected
     constructor Create; virtual;
     function CreateObject: IStripeBaseObject; virtual; abstract;
@@ -255,6 +269,7 @@ type
     procedure Clear;
     procedure LoadFromJson(AJson: TJSONObject);
     function GetItem(index: integer): IStripeBaseObject;
+    property Count: integer read GetCount;
     property Item[index: integer]: IStripeBaseObject read GetItem;
   end;
 
@@ -436,19 +451,26 @@ type
   TStripeCustomer = class(TStripeBaseObject, IStripeCustomer)
   strict private
     FEmail: string;
-    FCurrency: string;
+    FDescription: string;
+    FCurrency: TStripeCurrency;
     FAccountBalance: integer;
     FSubscriptions: IStripeSubscriptionList;
   private
     function GetAccountBalance: integer;
-    function GetCurrency: string;
+    function GetCurrency: TStripeCurrency;
     function GetEmail: string;
+    procedure SetAccountBalance(const Value: integer);
+    procedure SetCurrency(const Value: TStripeCurrency);
+    procedure SetEmail(const Value: string);
+    function GetDescription: string;
+    procedure SetDescription(const Value: string);
   protected
     function GetObject: string; override;
     procedure LoadFromJson(AJson: TJsonObject); override;
-    property Email: string read GetEmail;
-    property Currency: string read GetCurrency;
-    property AccountBalance: integer read GetAccountBalance;
+    property Email: string read GetEmail write SetEmail;
+    property Currency: TStripeCurrency read GetCurrency write SetCurrency;
+    property AccountBalance: integer read GetAccountBalance write SetAccountBalance;
+    property Description: string read GetDescription write SetDescription;
   public
     constructor Create; override;
   end;
@@ -480,9 +502,12 @@ type
     function PostHttp(AToken, AMethod: string; AParams: TStrings): string;
     function GetLastError: string;
   protected
-    function GetCustomer(ACustID: string): IStripeCustomer;
     function CreateToken(ACardNum: string; AExpMonth, AExpYear: integer; ACvc: string): string;
     function CreateCharge(AToken, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp): IStripeCharge;
+    function CreateChargeForCustomer(ACustID, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp): IStripeCharge;
+    function GetCustomer(ACustID: string): IStripeCustomer;
+    function GetCustomers: IStripeCusotomerList;
+    function CreateCustomer(AEmail, ADescription: string; ABalancePence: integer): IStripeCustomer;
     property LastError: string read GetLastError;
   public
     constructor Create(ASecretKey: string);
@@ -494,6 +519,11 @@ type
 function  CreateStripe(ASecretKey: string): IStripe;
 begin
   Result := TStripe.Create(ASecretKey);
+end;
+
+function CreateStripeCustomer: IStripeCustomer;
+begin
+  Result := TStripeCustomer.Create;
 end;
 
 function CurrencyToString(ACurrency: TStripeCurrency): string;
@@ -555,6 +585,12 @@ begin
   end;
 end;
 
+function TStripe.CreateChargeForCustomer(ACustID, ADescription: string;
+  AAmountPence: integer; const ACurrency: TStripeCurrency): IStripeCharge;
+begin
+  Result := CreateCharge(ACustID, ADescription, AAmountPence, ACurrency);
+end;
+
 function TStripe.CreateHttp: TNetHTTPClient;
 begin
   Result := TNetHTTPClient.Create(nil);
@@ -602,6 +638,21 @@ begin
   end;
 end;
 
+function TStripe.GetCustomers: IStripeCusotomerList;
+var
+  AResult: string;
+  AJson: TJSONObject;
+begin
+  Result := TStripeCustomerList.Create;
+  AResult := GetHttp(C_CUSTOMERS);
+  AJson := TJSONObject.ParseJSONValue(AResult) as TJSONObject;
+  try
+    Result.LoadFromJson(AJson);
+  finally
+    AJson.Free;
+  end;
+end;
+
 function TStripe.GetHttp(AMethod: string): string;
 var
   AHttp: TNetHTTPClient;
@@ -630,12 +681,36 @@ begin
   AHttp := CreateHttp;
   try
     if AToken <> '' then
-      AParams.Values['source'] := AToken;
+    begin
+      if Pos('tok_', AToken) = 1 then AParams.Values['source'] := AToken;
+      if Pos('cus_', AToken) = 1 then AParams.Values['customer'] := AToken;
+    end;
     AHttp.CustomHeaders['Authorization'] := 'Bearer '+FSecretKey;
     AResponse := AHttp.Post('https://api.stripe.com/v1/'+AMethod, AParams);
     Result := AResponse.ContentAsString
   finally
     AHttp.Free;
+  end;
+end;
+
+function TStripe.CreateCustomer(AEmail, ADescription: string; ABalancePence: integer): IStripeCustomer;
+var
+  AParams: TStrings;
+  AResult: string;
+  AJson: TJSONObject;
+begin
+  Result := TStripeCustomer.Create;
+  AParams := TStringList.Create;
+  try
+    AParams.Values['email'] := AEmail;
+    AParams.Values['description'] := ADescription;
+    AParams.Values['account_balance'] := IntToStr(ABalancePence);
+    AResult := PostHttp('', C_CUSTOMERS, AParams);
+    AJson := TJSONObject.ParseJSONValue(AResult) as TJSONObject;
+    CheckForError(AJson);
+    Result.LoadFromJson(AJson);
+  finally
+    AParams.Free;
   end;
 end;
 
@@ -794,6 +869,7 @@ end;
 constructor TStripeCustomer.Create;
 begin
   FSubscriptions := TStripeSubscriptionList.Create;
+  FCurrency := scGbp;
 end;
 
 function TStripeCustomer.GetAccountBalance: integer;
@@ -801,9 +877,14 @@ begin
   Result := FAccountBalance;
 end;
 
-function TStripeCustomer.GetCurrency: string;
+function TStripeCustomer.GetCurrency: TStripeCurrency;
 begin
   Result := FCurrency;
+end;
+
+function TStripeCustomer.GetDescription: string;
+begin
+  Result := FDescription;
 end;
 
 function TStripeCustomer.GetEmail: string;
@@ -820,9 +901,29 @@ procedure TStripeCustomer.LoadFromJson(AJson: TJsonObject);
 begin
   inherited;
   FEmail := StrFromJson('email');
-  FCurrency := StrFromJson('currency');
+  FCurrency := StringToCurrency(StrFromJson('currency'));
   FAccountBalance := IntFromJson('account_balance');
-  FSubscriptions.LoadFromJson(AJson);
+  FSubscriptions.LoadFromJson(AJson.Values['subscriptions'] as TJSONObject);
+end;
+
+procedure TStripeCustomer.SetAccountBalance(const Value: integer);
+begin
+  FAccountBalance := Value;
+end;
+
+procedure TStripeCustomer.SetCurrency(const Value: TStripeCurrency);
+begin
+  FCurrency := Value;
+end;
+
+procedure TStripeCustomer.SetDescription(const Value: string);
+begin
+  FDescription := Value;
+end;
+
+procedure TStripeCustomer.SetEmail(const Value: string);
+begin
+  FEmail := Value;
 end;
 
 //------------------------------------------------------------------------------
@@ -976,7 +1077,7 @@ end;
 function TStripeBaseObjectList.AddObject: IStripeBaseObject;
 begin
   Result := CreateObject;
-  FItems.Add(Result as TStripeBaseObject);
+  FItems.Add(TStripeBaseObject(Result));
 end;
 
 procedure TStripeBaseObjectList.Clear;
@@ -989,6 +1090,11 @@ begin
   FItems := TList<TStripeBaseObject>.Create;
 end;
 
+function TStripeBaseObjectList.GetCount: integer;
+begin
+  Result := FItems.Count;
+end;
+
 function TStripeBaseObjectList.GetItem(index: integer): IStripeBaseObject;
 begin
   Result := FItems[index];
@@ -996,19 +1102,18 @@ end;
 
 procedure TStripeBaseObjectList.LoadFromJson(AJson: TJSONObject);
 var
-  AObj: TJSONObject;
   AArray: TJSONArray;
   ICount: integer;
 begin
   Clear;
-  AObj := AJson.Values[GetListID] as TJSONObject;
-  AArray := AObj.Values['data'] as TJSONArray;
+  if AJson = nil then
+    Exit;
+  AArray := AJson.Values['data'] as TJSONArray;
   for ICount := 0 to AArray.Count-1 do
   begin
     AddObject.LoadFromJson(AArray.Items[ICount] as TJsonObject);
   end;
 end;
-
 
 //------------------------------------------------------------------------------
 
