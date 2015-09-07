@@ -26,7 +26,7 @@ unit ksStripe;
 
 interface
 
-uses Classes, Json, Generics.Collections;
+uses Classes, Json, Generics.Collections, DateUtils, SysUtils;
 
 type
   TStripeCurrency = (scUnknown, scGbp, scUsd);
@@ -200,7 +200,8 @@ type
     function CreateCharge(AToken, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp): IStripeCharge;
     function CreateChargeForCustomer(ACustID, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp): IStripeCharge;
     function GetCustomer(ACustID: string): IStripeCustomer;
-    function GetCustomers: IStripeCusotomerList;
+    function GetCustomers(const ACreatedAfter: TDateTime = -1;
+                          const ACreatedBefore: TDateTime = -1): IStripeCusotomerList;
     function CreateCustomer(AEmail, ADescription: string; ABalancePence: integer): IStripeCustomer;
     property LastError: string read GetLastError;
   end;
@@ -214,8 +215,7 @@ type
 
 implementation
 
-uses System.Net.URLClient, System.Net.HttpClient, System.Net.HttpClientComponent,
-  SysUtils, DateUtils;
+uses System.Net.URLClient, System.Net.HttpClient, System.Net.HttpClientComponent;
 
 const
   C_CARD = 'card';
@@ -498,7 +498,7 @@ type
                                       APassword: string; var AbortAuth: Boolean;
                                       var Persistence: TAuthPersistenceType);
     function CreateHttp: TNetHTTPClient;
-    function GetHttp(AMethod: string): string;
+    function GetHttp(AMethod: string; AParams: TStrings): string;
     function PostHttp(AToken, AMethod: string; AParams: TStrings): string;
     function GetLastError: string;
   protected
@@ -506,7 +506,8 @@ type
     function CreateCharge(AToken, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp): IStripeCharge;
     function CreateChargeForCustomer(ACustID, ADescription: string; AAmountPence: integer; const ACurrency: TStripeCurrency = scGbp): IStripeCharge;
     function GetCustomer(ACustID: string): IStripeCustomer;
-    function GetCustomers: IStripeCusotomerList;
+    function GetCustomers(const ACreatedAfter: TDateTime  = -1;
+                          const ACreatedBefore: TDateTime = -1): IStripeCusotomerList;
     function CreateCustomer(AEmail, ADescription: string; ABalancePence: integer): IStripeCustomer;
     property LastError: string read GetLastError;
   public
@@ -629,7 +630,7 @@ var
   AJson: TJSONObject;
 begin
   Result := TStripeCustomer.Create;
-  AResult := GetHttp(C_CUSTOMERS+'/'+ACustID);
+  AResult := GetHttp(C_CUSTOMERS+'/'+ACustID, nil);
   AJson := TJSONObject.ParseJSONValue(AResult) as TJSONObject;
   try
     Result.LoadFromJson(AJson);
@@ -638,31 +639,63 @@ begin
   end;
 end;
 
-function TStripe.GetCustomers: IStripeCusotomerList;
+function TStripe.GetCustomers(const ACreatedAfter: TDateTime = -1;
+                              const ACreatedBefore: TDateTime = -1): IStripeCusotomerList;
 var
   AResult: string;
   AJson: TJSONObject;
+  AParams: TStrings;
 begin
-  Result := TStripeCustomerList.Create;
-  AResult := GetHttp(C_CUSTOMERS);
-  AJson := TJSONObject.ParseJSONValue(AResult) as TJSONObject;
+  AParams := TStringList.Create;
   try
-    Result.LoadFromJson(AJson);
+    if ACreatedAfter > -1 then AParams.Values['created[gt]'] := IntToStr(DateTimeToUnix(ACreatedAfter));
+    if ACreatedBefore > -1 then AParams.Values['created[lt]'] := IntToStr(DateTimeToUnix(ACreatedBefore));
+
+    Result := TStripeCustomerList.Create;
+    AResult := GetHttp(C_CUSTOMERS, AParams);
+    AJson := TJSONObject.ParseJSONValue(AResult) as TJSONObject;
+    try
+      Result.LoadFromJson(AJson);
+    finally
+      AJson.Free;
+    end;
   finally
-    AJson.Free;
+    AParams.Free;
   end;
 end;
 
-function TStripe.GetHttp(AMethod: string): string;
+function TStripe.GetHttp(AMethod: string; AParams: TStrings): string;
+
+  function ParamsToUrl(AStrings: TStrings): string;
+  var
+    ICount: integer;
+  begin
+    Result := '';
+    for ICount := 0 to AStrings.Count-1 do
+    begin
+      Result := Result + AStrings[ICount];
+      if ICount < AStrings.Count-1 then
+        Result := Result + '&';
+    end;
+  end;
+
 var
   AHttp: TNetHTTPClient;
   AResponse: IHTTPResponse;
+  AUrl: string;
 begin
   AHttp := CreateHttp;
   try
+    AUrl := 'https://api.stripe.com/v1/'+AMethod;
+    if AParams <> nil then
+    begin
+      if AParams.Count > 0 then
+        AUrl := AUrl + '?'+ParamsToUrl(AParams);
+    end;
+
     AHttp.CustomHeaders['Authorization'] := 'Bearer '+FSecretKey;
-    AResponse := AHttp.Get('https://api.stripe.com/v1/'+AMethod);
-    Result := AResponse.ContentAsString
+    AResponse := AHttp.Get(AUrl);
+    Result := AResponse.ContentAsString;
   finally
     AHttp.Free;
   end;
