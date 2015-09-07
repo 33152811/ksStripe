@@ -13,7 +13,7 @@ var
   ACharge: IStripeCharge;
 begin
   // create stripe interface...
-  AStripe := CreateStripe('sk_test_Lu2hbyBMk9M2XReFtcSQ8HQB');
+  AStripe := CreateStripe('sk_xxxx_xxxxxxxxxxxxxxxxxxxxxx');
 
   // generate a charge token...
   AToken := AStripe.CreateToken('4000000000000002', 10, 2015, '124');
