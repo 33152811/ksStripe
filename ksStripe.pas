@@ -577,6 +577,7 @@ begin
   try
     AParams.Values['amount'] := IntToStr(AAmountPence);
     AParams.Values['currency'] := CurrencyToString(ACurrency);
+    AParams.Values['description'] := ADescription;
     AResult := PostHttp(AToken, C_CHARGES, AParams);
     AJson := TJSONObject.ParseJSONValue(AResult) as TJSONObject;
     CheckForError(AJson);
